@@ -81,6 +81,11 @@ type Config struct {
 	Header                  *HeaderConfig         `mapstructure:"header,omitempty"`
 }
 
+type ReaderWrapper struct {
+	reader *Reader
+	fp     *Fingerprint
+}
+
 // Build will build a file input operator from the supplied configuration
 func (c Config) Build(logger *zap.SugaredLogger, emit EmitFunc) (*Manager, error) {
 	if c.DeleteAfterRead && !allowFileDeletion.IsEnabled() {
@@ -166,14 +171,15 @@ func (c Config) buildManager(logger *zap.SugaredLogger, emit EmitFunc, factory s
 			encodingConfig:  c.Splitter.EncodingConfig,
 			headerSettings:  hs,
 		},
+		trie:            NewTrie(),
 		finder:          c.Finder,
 		roller:          newRoller(),
 		pollInterval:    c.PollInterval,
 		maxBatchFiles:   c.MaxConcurrentFiles / 2,
-		maxBatches:      c.MaxBatches,
 		deleteAfterRead: c.DeleteAfterRead,
 		knownFiles:      make([]*Reader, 0, 10),
 		seenPaths:       make(map[string]struct{}, 100),
+		readerChan:      make(chan ReaderWrapper, c.MaxConcurrentFiles/2),
 	}, nil
 }
 

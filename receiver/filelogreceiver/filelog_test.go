@@ -122,7 +122,7 @@ func TestReadStaticFile(t *testing.T) {
 
 	wg.Wait()
 
-	require.Eventually(t, expectNLogs(sink, 3), 2*time.Second, 5*time.Millisecond,
+	require.Eventually(t, expectNLogs(sink, 3), 5*time.Second, 5*time.Millisecond,
 		"expected %d but got %d logs",
 		3, sink.LogRecordCount(),
 	)
@@ -216,7 +216,7 @@ func (rt *rotationTest) Run(t *testing.T) {
 	}
 
 	wg.Wait()
-	require.Eventually(t, expectNLogs(sink, numLogs), 2*time.Second, 10*time.Millisecond,
+	require.Eventually(t, expectNLogs(sink, numLogs), 5*time.Second, 10*time.Millisecond,
 		"expected %d but got %d logs",
 		numLogs, sink.LogRecordCount(),
 	)

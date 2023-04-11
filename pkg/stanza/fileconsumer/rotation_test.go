@@ -44,7 +44,7 @@ func TestMultiFileRotate(t *testing.T) {
 	tempDir := t.TempDir()
 	cfg := NewConfig().includeDir(tempDir)
 	cfg.StartAt = "beginning"
-	operator, emitCalls := buildTestManager(t, cfg)
+	operator, emitCalls := buildTestManagerWithOptions(t, cfg)
 
 	numFiles := 3
 	numMessages := 3
@@ -101,7 +101,7 @@ func TestMultiFileRotateSlow(t *testing.T) {
 	tempDir := t.TempDir()
 	cfg := NewConfig().includeDir(tempDir)
 	cfg.StartAt = "beginning"
-	operator, emitCalls := buildTestManager(t, cfg)
+	operator, emitCalls := buildTestManagerWithOptions(t, cfg)
 
 	getMessage := func(f, k, m int) string { return fmt.Sprintf("file %d-%d, message %d", f, k, m) }
 	fileName := func(f, k int) string { return filepath.Join(tempDir, fmt.Sprintf("file%d.rot%d.log", f, k)) }
@@ -155,7 +155,7 @@ func TestMultiCopyTruncateSlow(t *testing.T) {
 	tempDir := t.TempDir()
 	cfg := NewConfig().includeDir(tempDir)
 	cfg.StartAt = "beginning"
-	operator, emitCalls := buildTestManager(t, cfg)
+	operator, emitCalls := buildTestManagerWithOptions(t, cfg)
 
 	getMessage := func(f, k, m int) string { return fmt.Sprintf("file %d-%d, message %d", f, k, m) }
 	fileName := func(f, k int) string { return filepath.Join(tempDir, fmt.Sprintf("file%d.rot%d.log", f, k)) }
@@ -264,7 +264,7 @@ func (rt rotationTest) run(tc rotationTest, copyTruncate, sequential bool) func(
 		cfg.StartAt = "beginning"
 		cfg.PollInterval = tc.pollInterval
 		emitCalls := make(chan *emitParams, tc.totalLines)
-		operator := buildTestManagerWithEmit(t, cfg, emitCalls)
+		operator, _ := buildTestManagerWithOptions(t, cfg, withEmitChan(emitCalls))
 
 		logger := getRotatingLogger(t, tempDir, tc.maxLinesPerFile, tc.maxBackupFiles, copyTruncate, sequential)
 
@@ -368,7 +368,8 @@ func TestMoveFile(t *testing.T) {
 	tempDir := t.TempDir()
 	cfg := NewConfig().includeDir(tempDir)
 	cfg.StartAt = "beginning"
-	operator, emitCalls := buildTestManager(t, cfg)
+	// Keep the poll interval high, as we're manually calling poll()
+	operator, emitCalls := buildTestManagerWithOptions(t, cfg, withReaderChan())
 	operator.persister = testutil.NewMockPersister("test")
 
 	temp1 := openTemp(t, tempDir)
@@ -382,8 +383,6 @@ func TestMoveFile(t *testing.T) {
 
 	waitForToken(t, emitCalls, []byte("testlog1"))
 
-	// Wait until all goroutines are finished before renaming
-	operator.wg.Wait()
 	err := os.Rename(temp1.Name(), fmt.Sprintf("%s.2", temp1.Name()))
 	require.NoError(t, err)
 
@@ -400,7 +399,7 @@ func TestTrackMovedAwayFiles(t *testing.T) {
 	tempDir := t.TempDir()
 	cfg := NewConfig().includeDir(tempDir)
 	cfg.StartAt = "beginning"
-	operator, emitCalls := buildTestManager(t, cfg)
+	operator, emitCalls := buildTestManagerWithOptions(t, cfg, withReaderChan())
 	operator.persister = testutil.NewMockPersister("test")
 
 	temp1 := openTemp(t, tempDir)
@@ -414,9 +413,6 @@ func TestTrackMovedAwayFiles(t *testing.T) {
 
 	waitForToken(t, emitCalls, []byte("testlog1"))
 
-	// Wait until all goroutines are finished before renaming
-	operator.wg.Wait()
-
 	newDir := fmt.Sprintf("%s%s", tempDir[:len(tempDir)-1], "_new/")
 	err := os.Mkdir(newDir, 0777)
 	require.NoError(t, err)
@@ -427,6 +423,7 @@ func TestTrackMovedAwayFiles(t *testing.T) {
 
 	movedFile, err := os.OpenFile(newFileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	require.NoError(t, err)
+	operator.poll(context.Background())
 	writeString(t, movedFile, "testlog2\n")
 	operator.poll(context.Background())
 
@@ -444,7 +441,7 @@ func TestTrackRotatedFilesLogOrder(t *testing.T) {
 	tempDir := t.TempDir()
 	cfg := NewConfig().includeDir(tempDir)
 	cfg.StartAt = "beginning"
-	operator, emitCalls := buildTestManager(t, cfg)
+	operator, emitCalls := buildTestManagerWithOptions(t, cfg)
 
 	originalFile := openTemp(t, tempDir)
 	orginalName := originalFile.Name()
@@ -485,13 +482,13 @@ func TestTruncateThenWrite(t *testing.T) {
 	tempDir := t.TempDir()
 	cfg := NewConfig().includeDir(tempDir)
 	cfg.StartAt = "beginning"
-	operator, emitCalls := buildTestManager(t, cfg)
+	operator, emitCalls := buildTestManagerWithOptions(t, cfg, withReaderChan())
 	operator.persister = testutil.NewMockPersister("test")
 
 	temp1 := openTemp(t, tempDir)
 	writeString(t, temp1, "testlog1\ntestlog2\n")
 
-	operator.poll(context.Background())
+	operator.poll(operator.ctx)
 	defer func() {
 		require.NoError(t, operator.Stop())
 	}()
@@ -504,7 +501,7 @@ func TestTruncateThenWrite(t *testing.T) {
 	require.NoError(t, err)
 
 	writeString(t, temp1, "testlog3\n")
-	operator.poll(context.Background())
+	operator.poll(operator.ctx)
 	waitForToken(t, emitCalls, []byte("testlog3"))
 	expectNoTokens(t, emitCalls)
 }
@@ -522,20 +519,19 @@ func TestCopyTruncateWriteBoth(t *testing.T) {
 	tempDir := t.TempDir()
 	cfg := NewConfig().includeDir(tempDir)
 	cfg.StartAt = "beginning"
-	operator, emitCalls := buildTestManager(t, cfg)
+	operator, emitCalls := buildTestManagerWithOptions(t, cfg, withReaderChan())
 	operator.persister = testutil.NewMockPersister("test")
 
 	temp1 := openTemp(t, tempDir)
 	writeString(t, temp1, "testlog1\ntestlog2\n")
 
-	operator.poll(context.Background())
+	operator.poll(operator.ctx)
 	defer func() {
 		require.NoError(t, operator.Stop())
 	}()
 
 	waitForToken(t, emitCalls, []byte("testlog1"))
 	waitForToken(t, emitCalls, []byte("testlog2"))
-	operator.wg.Wait() // wait for all goroutines to finish
 
 	// Copy the first file to a new file, and add another log
 	temp2 := openTemp(t, tempDir)
@@ -565,7 +561,7 @@ func TestFileMovedWhileOff_BigFiles(t *testing.T) {
 	tempDir := t.TempDir()
 	cfg := NewConfig().includeDir(tempDir)
 	cfg.StartAt = "beginning"
-	operator, emitCalls := buildTestManager(t, cfg)
+	operator, emitCalls := buildTestManagerWithOptions(t, cfg)
 	persister := testutil.NewMockPersister("test")
 
 	log1 := tokenWithLength(1000)
