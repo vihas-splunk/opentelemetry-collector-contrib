@@ -1,4 +1,4 @@
-module github.com/open-telemetry/opentelemetry-collector-contrib/receiver/scriptreceiver
+module github.com/VihasMakwana/opentelemetry-collector-contrib/receiver/scriptreceiver
 
 go 1.19
 
