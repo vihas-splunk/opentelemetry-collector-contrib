@@ -1,4 +1,4 @@
-module github.com/VihasMakwana/opentelemetry-collector-contrib/receiver/scriptreceiver
+module github.com/open-telemetry/opentelemetry-collector-contrib/receiver/scriptreceiver
 
 go 1.19
 
@@ -72,3 +72,5 @@ retract v0.65.0
 
 // https://github.com/go-openapi/spec/issues/156
 replace github.com/go-openapi/spec v0.20.5 => github.com/go-openapi/spec v0.20.6
+
+replace github.com/open-telemetry/opentelemetry-collector-contrib/receiver/scriptreceiver => github.com/VihasMakwana/opentelemetry-collector-contrib/receiver/scriptreceiver
