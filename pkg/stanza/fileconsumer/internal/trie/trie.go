@@ -12,69 +12,80 @@
 
 package trie // import "github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/fileconsumer/internal/trie"
 
-type Trie struct {
-	isEnd    bool
-	children map[byte]*Trie
-	parent   *Trie
+type Trie[T comparable] struct {
+	children map[byte]*Trie[T]
+	value    T
+	parent   *Trie[T]
 }
 
 // NewTrie allocates and returns a new *Trie.
-func NewTrie() *Trie {
-	return &Trie{}
+func NewTrie[T comparable]() *Trie[T] {
+	return &Trie[T]{}
 }
 
-func (trie *Trie) HasKey(key []byte) bool {
+func (trie *Trie[T]) HasKey(key []byte) (bool, T) {
 	node := trie
-	isEnd := false
+	isPresent := false
+	var nullValue T
+	matched := 0
 	for _, r := range key {
 		node = node.children[r]
 		if node == nil {
-			return isEnd
+			return isPresent, nullValue
 		}
-		// We have reached end of the current path and all the previous characters have matched
-		// Return if current node is leaf and it is not root
-		if node.isLeaf() && node != trie {
-			return true
-		}
+		matched += 1
 		// check for any ending node in our current path
-		isEnd = isEnd || node.isEnd
+		isPresent = isPresent || !node.isNull()
+		// We have reached end of the current path and all the previous characters have matched
+		// break from here
+		if node.isLeaf() && node != trie {
+			break
+		}
 	}
-	return isEnd
+	if matched < len(key) {
+		// not a match for value as the key length exceeds the trie depth
+		return isPresent, nullValue
+	}
+	return isPresent, node.value
 }
 
 // Put inserts the key into the trie
-func (trie *Trie) Put(key []byte) {
+func (trie *Trie[T]) Put(key []byte, value T) {
+	var nullValue T // This is used to assign empty value to nodes
+	var last *Trie[T]
 	node := trie
 	shouldPush := false
-	var last *Trie
 	for _, r := range key {
 		child, ok := node.children[r]
 		if !ok {
 			if node.children == nil {
-				node.children = map[byte]*Trie{}
+				node.children = map[byte]*Trie[T]{}
 			}
-			child = NewTrie()
+			child = NewTrie[T]()
 			child.parent = node
 			node.children[r] = child
 		}
 		node = child
-		if node.isEnd {
+		if !node.isNull() {
 			last = node
 			shouldPush = true
 		}
 	}
+	node.value = value
 	if shouldPush {
-		last.isEnd = false
+		node.value = last.value
+		last.value = nullValue
 	}
-	node.isEnd = true
 }
 
 // Delete removes keys from the Trie. Returns true if node was found for the given key.
 // If the node or any of its ancestors
 // becomes childless as a result, it is removed from the trie.
-func (trie *Trie) Delete(key []byte) bool {
+func (trie *Trie[T]) Delete(key []byte) bool {
+	var path []*Trie[T] // record ancestors to check later
 	node := trie
 	for _, b := range key {
+		path = append(path, node)
 		node = node.children[b]
 		if node == nil {
 			// node does not exist
@@ -84,16 +95,17 @@ func (trie *Trie) Delete(key []byte) bool {
 	return trie.DeleteNode(node)
 }
 
-func (trie *Trie) DeleteNode(node *Trie) bool {
-	if !node.isEnd {
-		// someonce called delete on the node which is not end of current path
-		// exit straightaway and return false
+func (trie *Trie[T]) DeleteNode(node *Trie[T]) bool {
+	var nullValue T // This is used to assign empty value to nodes
+	if node.isNull() {
+		// someonce called Delete() on the node which doesn't have any value
+		// exit straight away
 		return false
 	}
-	node.isEnd = false
-	// if leaf, remove it from its parent's children map.
+	node.value = nullValue
+	// if leaf, remove it from its parent's children map. Repeat for ancestor path.
 	if node.isLeaf() {
-		// iterate backwards over path, until we reach root
+		// iterate backwards over path
 		for node != trie {
 			parent := node.parent
 
@@ -105,13 +117,12 @@ func (trie *Trie) DeleteNode(node *Trie) bool {
 					break
 				}
 			}
-
 			if !parent.isLeaf() {
 				// parent has other children, stop
 				break
 			}
 			parent.children = nil
-			if parent.isEnd {
+			if !parent.isNull() {
 				// Parent has a value, stop
 				break
 			}
@@ -121,6 +132,13 @@ func (trie *Trie) DeleteNode(node *Trie) bool {
 	return true // node (internal or not) existed and its value was nil'd
 }
 
-func (trie *Trie) isLeaf() bool {
+func (trie *Trie[T]) isNull() bool {
+	var nullValue T
+	return trie.value == nullValue
+}
+
+func (trie *Trie[T]) isLeaf() bool {
 	return len(trie.children) == 0
 }
+
+type Value interface{}
