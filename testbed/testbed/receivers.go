@@ -30,12 +30,26 @@ type DataReceiver interface {
 
 	// ProtocolName returns exporterType name to use in collector config pipeline.
 	ProtocolName() string
+
+	// WithQueue and WithRetry are used to set sending_queue/retry_after_failure settings for exporters
+	WithQueue(sendingQueue string)
+	WithRetry(retry string)
 }
 
 // DataReceiverBase implement basic functions needed by all receivers.
 type DataReceiverBase struct {
 	// Port on which to listen.
-	Port int
+	Port         int
+	Retry        string
+	SendingQueue string
+}
+
+func (base *DataReceiverBase) WithQueue(sendingQueue string) {
+	base.SendingQueue = sendingQueue
+}
+
+func (base *DataReceiverBase) WithRetry(retry string) {
+	base.Retry = retry
 }
 
 // TODO: Move these constants.
@@ -114,8 +128,10 @@ func (bor *BaseOTLPDataReceiver) GenConfigYAMLStr() string {
 	str := fmt.Sprintf(`
   %s:
     endpoint: "%s"
+    %s
+    %s
     tls:
-      insecure: true`, bor.exporterType, addr)
+      insecure: true`, bor.exporterType, addr, bor.Retry, bor.SendingQueue)
 
 	comp := "none"
 	if bor.compression != "" {
